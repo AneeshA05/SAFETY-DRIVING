@@ -1,0 +1,224 @@
+#include <TinyGPS++.h>
+#include <SPI.h>
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <Temboo.h>
+#include <math.h>
+#include "TembooAccount.h"
+WiFiClient client;
+TinyGPSPlus gps;
+   
+//#include <BMA222.h>
+const String GMAIL_USER_NAME = "cl.abhinavthakur@gmail.com";
+const String GMAIL_APP_PASSWORD = "xqgdcgnbpjjngyvs";
+const String TO_EMAIL_ADDRESS = "parvassharma662@gmail.com";
+//const String TO_EMAIL_ADDRESS2 = "aneeshpatial98060@gmail.com";
+boolean attempted = false; 
+float l,lo;//latitude and longitude
+char sen[200];//send the gps url
+unsigned long start = millis();
+  unsigned long ms =30000;
+  int count,calls=1;//counting of ir module
+float rpm,cirm_cm,dist_km,km_per_sec,km_per_hr ,speedlimit=1;
+  int radius =1; 
+
+int countspeedover=0;//To count the speed of the vehicle
+
+void setup()
+{
+  Serial.begin(19200);//connection to port
+  int wifiStatus = WL_IDLE_STATUS;
+  while(wifiStatus != WL_CONNECTED) {
+   Serial.print("WiFi:");
+    wifiStatus = WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+   if (wifiStatus == WL_CONNECTED) {
+      Serial.println("OK");
+    } else {
+      Serial.println("FAIL");
+    }
+    
+    delay(3000);
+  }
+  pinMode(7, INPUT); //taking input to ir sensor
+   pinMode(10, OUTPUT); //Green LED 
+  pinMode(29, OUTPUT);     //RED LED
+
+}
+void loop()
+{
+  smartDelay(1000);//Gives a dealay of 1sec
+ count = 0;//count for ir sensor
+ Serial.println ("digitalread is = ");
+  start=millis(); //gives the current time
+  while ((millis()- start) <ms )
+{  Serial.print (digitalRead(7));
+  if (digitalRead(7)==LOW)  //IR is LOW
+{ 
+  count++;
+  while(digitalRead(7)!=HIGH);
+}  
+
+}
+Serial.print (count);
+//next is calculate the speed of the vehicle
+rpm = count/6;
+    cirm_cm = (2*3.14)*radius;
+    dist_km = cirm_cm/100000;
+    km_per_sec = dist_km*rpm;
+    km_per_hr = km_per_sec/3600;
+Serial.println ("speed is = ");
+km_per_hr=km_per_hr*1000000;
+Serial.print (km_per_hr);
+ if(speedlimit<km_per_hr)//speedlimit greater than 1, then run the if condition
+{
+ countspeedover++;//count  for speed overlimit
+ digitalWrite(29,HIGH);
+    delay(10000);
+    digitalWrite(29,LOW); 
+  if(countspeedover==1)
+ {
+  //sent the mail to person driving the vehicle
+    if (!attempted) {
+    Serial.println("Running SendAnEmail...");
+    TembooChoreo SendEmailChoreo(client);
+    SendEmailChoreo.begin();
+       SendEmailChoreo.setAccountName(TEMBOO_ACCOUNT);
+    SendEmailChoreo.setAppKeyName(TEMBOO_APP_KEY_NAME);
+    SendEmailChoreo.setAppKey(TEMBOO_APP_KEY);
+    SendEmailChoreo.setChoreo("/Library/Google/Gmail/SendEmail");
+    SendEmailChoreo.addInput("Username", GMAIL_USER_NAME);
+    SendEmailChoreo.addInput("Password", GMAIL_APP_PASSWORD);
+    SendEmailChoreo.addInput("ToAddress", TO_EMAIL_ADDRESS);
+    SendEmailChoreo.addInput("Subject", "ALERT: Speed overlimit");
+    SendEmailChoreo.addInput("MessageBody", "Hey!!!!! You need to maintain your car speed!");
+    unsigned int returnCode = SendEmailChoreo.run();
+      if (returnCode == 0) {
+        Serial.println("Success! Email sent!");
+    } else {
+      while (SendEmailChoreo.available()) {
+        char c = SendEmailChoreo.read();
+        Serial.print(c);
+      }
+    } 
+    SendEmailChoreo.close();
+  //  attempted = true;
+    }
+    //sms to the owner 
+        Serial.println("Running SendSMS - Run #" + String(calls++));
+        TembooChoreo SendSMSChoreo(client);
+        SendSMSChoreo.begin();
+         SendSMSChoreo.setAccountName(TEMBOO_ACCOUNT);
+    SendSMSChoreo.setAppKeyName(TEMBOO_APP_KEY_NAME);
+    SendSMSChoreo.setAppKey(TEMBOO_APP_KEY);
+    String AuthTokenValue = "f30ee7cf23c3475674422c1fc79df75a";
+    SendSMSChoreo.addInput("AuthToken", AuthTokenValue);
+    String ToValue = "+919459613418";
+    SendSMSChoreo.addInput("To", ToValue);
+    String FromValue = "+19783102935";
+    SendSMSChoreo.addInput("From", FromValue);
+    String BodyValue = "Heyyyy you are going to die if you don't  slow your car speed";
+    SendSMSChoreo.addInput("Body", BodyValue);
+    String AccountSIDValue = "AC2b29fb5d856a459efd3b11c5a1f98b92";
+    SendSMSChoreo.addInput("AccountSID", AccountSIDValue);
+      SendSMSChoreo.setChoreo("/Library/Twilio/SMSMessages/SendSMS");
+       SendSMSChoreo.run(901, USE_SSL);
+    
+    while(SendSMSChoreo.available()) {
+      char c = SendSMSChoreo.read();
+      Serial.print(c);
+    }
+    SendSMSChoreo.close();
+ }
+ //next is sending location of the vehicle
+ else if(countspeedover==2)
+ {
+   if (!gps.location.isValid())
+        {          
+          Serial.print("Latitude : ");
+          Serial.println("*****");
+          Serial.print("Longitude : ");
+          Serial.println("*****");
+        }
+        else
+        {
+ l=gps.location.lat();
+ lo=gps.location.lng();
+ sprintf(sen,"https://www.google.com/maps/@%f,%f,15z",l,lo);
+ delay(3000);
+  if (!attempted) {
+
+    Serial.println("Running SendAnEmail...");
+  
+    TembooChoreo SendEmailChoreo(client);
+    SendEmailChoreo.begin();
+    
+    // set Temboo account credentials
+    SendEmailChoreo.setAccountName(TEMBOO_ACCOUNT);
+    SendEmailChoreo.setAppKeyName(TEMBOO_APP_KEY_NAME);
+    SendEmailChoreo.setAppKey(TEMBOO_APP_KEY);
+    SendEmailChoreo.setChoreo("/Library/Google/Gmail/SendEmail");   
+    SendEmailChoreo.addInput("Username", GMAIL_USER_NAME);
+    SendEmailChoreo.addInput("Password", GMAIL_APP_PASSWORD);
+    SendEmailChoreo.addInput("ToAddress", TO_EMAIL_ADDRESS);
+    SendEmailChoreo.addInput("Subject", "Your position is being sent to the company. Now ready to die by the deathnote");
+
+    // next comes the message body, the main content of the email   
+    SendEmailChoreo.addInput("MessageBody",sen);
+    // tell the Choreo to run and wait for the results. The 
+    // return code (returnCode) will tell us whether the Temboo client 
+    // was able to send our request to the Temboo servers
+    unsigned int returnCode = SendEmailChoreo.run();
+
+    // a wreturn code of zero (0) means everything worked
+    if (returnCode == 0) {
+        Serial.println("Success! Email sent!");
+    } else {
+      // a non-zero return code means there was an error
+      // read and print the error message
+      while (SendEmailChoreo.available()) {
+        char c = SendEmailChoreo.read();
+        Serial.print(c);
+      }
+    } 
+    SendEmailChoreo.close();
+ delay(3000);   
+    // set the flag showing we've tried
+    //attempted = true;
+  }
+
+        }
+       }
+ else if(countspeedover==3)
+ {
+  digitalWrite (10 ,LOW);
+  delay(10000);
+  digitalWrite(10 ,HIGH);
+  //sleep
+ }
+ 
+}
+else
+{
+  digitalWrite(29, LOW);   // turn the LED on (HIGH is the voltage level)
+ 
+}
+  delay(1000);
+}
+static void smartDelay(unsigned long m)
+{
+  unsigned long s = millis();
+  do 
+  {
+    while (Serial.available())  /* Encode data read from GPS while data is available on serial port */
+      gps.encode(Serial.read());
+    /* Encode basically is used to parse the string received by the GPS and to store it in a buffer so that information can be extracted from it */
+  } while (millis() - s < m);
+}
+
+#define TEMBOO_ACCOUNT "abhithakur"  // your Temboo account name 
+#define TEMBOO_APP_KEY_NAME "myFirstApp"  // your Temboo app name
+#define TEMBOO_APP_KEY  "liv54Wednwex6zCPukOH2T1xzDmmxBi6"  // your Temboo app key
+
+#define WIFI_SSID "ABHINAV"
+#define WIFI_PASSWORD "abhi1234"
